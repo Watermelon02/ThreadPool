@@ -1,15 +1,24 @@
-package xigua.threadpool
+package xigua.threadpool.threadPools
 
+import android.util.Log
+import xigua.threadpool.blockingQueue.MyLinkedBlockingQueue
+import xigua.threadpool.threadPools.MyThreadPoolExecutor.RunStatus.SHUTDOWN
 import java.lang.RuntimeException
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.AbstractQueuedSynchronizer
 import java.util.concurrent.locks.ReentrantLock
 
+/**
+ * 仿写的ThreadPoolExecutor,能够实现SingleThreadPoolExecutor,FixedPoolExecutor,CachedPoolExecutor
+ * */
+
 class MyThreadPoolExecutor(
     private val corePoolSize: Int,
     private val maxPoolSize: Int,
-    private val keepAliveTime: Int = 0
+    private val keepAliveTime: Long = 0,
+    private val timeUnit: TimeUnit,
+    private val taskQueue: BlockingQueue<Runnable>
 ) : AbstractExecutorService() {
     companion object RunStatus {
         const val RUNNING = 0
@@ -18,40 +27,66 @@ class MyThreadPoolExecutor(
         const val TERMINATED = 3
     }
 
-    @Volatile
+    //poolSize和runState在ThreadPoolExecutor中是一起以ctl存储的
+    var poolSize = AtomicInteger(0)
     private var runState = AtomicInteger(RUNNING)
     private val lock = ReentrantLock()
-
-    var poolSize = AtomicInteger(0)
-    val taskQueue = MyBlockingQueue<Runnable>()
     private val workers = HashSet<Worker>(corePoolSize)
 
     override fun execute(runnable: Runnable) {
-        if (poolSize.get() < corePoolSize && runState.get() == RUNNING) {
-            addNewWorker(runnable)
-        } else if (poolSize.get() >= corePoolSize && runState.get() == RUNNING) {
-            if (!taskQueue.offer(runnable) && poolSize.get() < maxPoolSize) {
-                TODO("当阻塞队列满，且未达到最大线程数时，创建新线程")
+        if (runState.get() == RUNNING) {
+            if (poolSize.get() < corePoolSize) addNewWorker(
+                runnable,
+                true
+            ) else if (poolSize.get() >= corePoolSize) {
+                if (taskQueue.offer(runnable)) {
+                    if (poolSize.get() == 0) {
+                        Log.d("testTag", "1")
+                        addNewWorker(null, false)
+                    }
+                } else {
+                    Log.d("testTag", "2")
+                    addNewWorker(runnable, false)
+                }
             }
-        } else {//错误策略
-            throw RuntimeException("xigua.threadpool.FixedThreadPool:out the bound of taskQueue")
+        } else {
+            shutdown()
         }
+        /*var c: Int = poolSize.get()
+        if (c < corePoolSize) {
+            addNewWorker(runnable, true)
+        }
+        if (runState.get() == RUNNING && taskQueue.offer(runnable)) {
+            if (runState.get() != RUNNING && taskQueue.remove(runnable)) {
+            }
+        } else if (poolSize.get() == 0) addNewWorker(null, false)
+        else {
+            Log.d("testTag", "1")
+            addNewWorker(runnable, false)
+        }*/
     }
 
-    private fun addNewWorker(runnable: Runnable) {
-        var workerAdded = false
-        val worker = Worker(runnable)
+
+    /**
+     * @param core 新增的worker是否是核心线程，影响方法中对于线程数目的判断。
+     * 如果不是核心线程，则将poolSize和MaximumPoolSizwe比较*/
+    private fun addNewWorker(runnable: Runnable?, core: Boolean) {
+
+        var worker: Worker? = null
         lock.lock()
         try {//execute中没有加锁后进行条件判断，因此可能存在线程同步导致的问题，所以这里加锁后再次进行判断(类似于DCL?)
-            if (poolSize.get() < corePoolSize && runState.get() == RUNNING) {
-                workers.add(worker)
+            worker = Worker(runnable)
+            if (runState.get() == RUNNING) {
+                if ((core && poolSize.get() < corePoolSize) || (!core && poolSize.get() < corePoolSize))
+                    workers.add(worker)
                 poolSize.getAndIncrement()
-                workerAdded = true
+            } else {
+                shutdown()
             }
         } finally {
             lock.unlock()
         }
-        if (workerAdded) worker.thread.start()
+        worker?.thread?.start()
     }
 
     override fun shutdown() {
@@ -84,12 +119,18 @@ class MyThreadPoolExecutor(
     }
 
     private fun getTask(): Runnable? {
-        return if (runState.get() == RUNNING && taskQueue.size() > 0) {
-            taskQueue.take()
-        } else {
-            null
+        val timed = keepAliveTime > 0//是否设置了KeepAliveTime
+        while (true) {
+            return if (runState.get() == RUNNING) {
+                if (timed) taskQueue.poll(keepAliveTime, timeUnit) else taskQueue.take()
+            } else {
+                null
+            }
         }
     }
+
+    fun scheduleAtFixedRate() {}
+    fun scheduleWithFixedDelay() {}
 
     private inner class Worker(var task: Runnable?) : Runnable, AbstractQueuedSynchronizer() {
 
