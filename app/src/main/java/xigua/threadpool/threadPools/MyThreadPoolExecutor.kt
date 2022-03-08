@@ -1,10 +1,8 @@
 package xigua.threadpool.threadPools
 
-import android.util.Log
-import xigua.threadpool.blockingQueue.MyLinkedBlockingQueue
-import xigua.threadpool.threadPools.MyThreadPoolExecutor.RunStatus.SHUTDOWN
-import java.lang.RuntimeException
-import java.util.concurrent.*
+import java.util.concurrent.AbstractExecutorService
+import java.util.concurrent.BlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.locks.AbstractQueuedSynchronizer
 import java.util.concurrent.locks.ReentrantLock
@@ -38,32 +36,18 @@ class MyThreadPoolExecutor(
             if (poolSize.get() < corePoolSize) addNewWorker(
                 runnable,
                 true
-            ) else if (poolSize.get() >= corePoolSize) {
+            ) else if (poolSize.get() in corePoolSize..maxPoolSize) {
                 if (taskQueue.offer(runnable)) {
                     if (poolSize.get() == 0) {
-                        Log.d("testTag", "1")
                         addNewWorker(null, false)
                     }
                 } else {
-                    Log.d("testTag", "2")
                     addNewWorker(runnable, false)
                 }
             }
         } else {
             shutdown()
         }
-        /*var c: Int = poolSize.get()
-        if (c < corePoolSize) {
-            addNewWorker(runnable, true)
-        }
-        if (runState.get() == RUNNING && taskQueue.offer(runnable)) {
-            if (runState.get() != RUNNING && taskQueue.remove(runnable)) {
-            }
-        } else if (poolSize.get() == 0) addNewWorker(null, false)
-        else {
-            Log.d("testTag", "1")
-            addNewWorker(runnable, false)
-        }*/
     }
 
 
@@ -72,7 +56,7 @@ class MyThreadPoolExecutor(
      * 如果不是核心线程，则将poolSize和MaximumPoolSizwe比较*/
     private fun addNewWorker(runnable: Runnable?, core: Boolean) {
 
-        var worker: Worker? = null
+        var worker: Worker?
         lock.lock()
         try {//execute中没有加锁后进行条件判断，因此可能存在线程同步导致的问题，所以这里加锁后再次进行判断(类似于DCL?)
             worker = Worker(runnable)

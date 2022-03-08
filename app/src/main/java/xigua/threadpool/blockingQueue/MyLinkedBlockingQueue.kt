@@ -30,14 +30,6 @@ class MyLinkedBlockingQueue<T>(private val size: Int = Int.MAX_VALUE) : MyBlocki
         } finally {
             producerLock.unlock()
         }
-        if (count.get() == 0) {
-            consumerLock.lock()
-            try {
-                consumerCondition.signal()
-            }finally {
-                consumerLock.unlock()
-            }
-        }
         return dataAdded
     }
 
@@ -71,14 +63,6 @@ class MyLinkedBlockingQueue<T>(private val size: Int = Int.MAX_VALUE) : MyBlocki
             count.getAndDecrement()
         } finally {
             consumerLock.unlock()
-        }
-        if (count.get() == size) {
-            producerLock.lock()
-            try {
-                producerCondition.signal()
-            } finally {
-                producerLock.unlock()
-            }
         }
         return data
     }
